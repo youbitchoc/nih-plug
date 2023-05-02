@@ -6,22 +6,19 @@ use parking_lot::Mutex;
 use raw_window_handle::HasRawWindowHandle;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use super::backend::Backend;
 use super::config::WrapperConfig;
 use super::context::{WrapperGuiContext, WrapperInitContext, WrapperProcessContext};
-use crate::audio_setup::{AudioIOLayout, BufferConfig, ProcessMode};
-use crate::context::gui::AsyncExecutor;
-use crate::context::process::Transport;
-use crate::editor::{Editor, ParentWindowHandle};
 use crate::event_loop::{EventLoop, MainThreadExecutor, OsEventLoop};
-use crate::midi::PluginNoteEvent;
-use crate::params::internals::ParamPtr;
-use crate::params::{ParamFlags, Params};
-use crate::plugin::{Plugin, ProcessStatus, TaskExecutor};
+use crate::prelude::{
+    AsyncExecutor, AudioIOLayout, BufferConfig, Editor, ParamFlags, ParamPtr, Params,
+    ParentWindowHandle, Plugin, PluginNoteEvent, ProcessMode, ProcessStatus, TaskExecutor,
+    Transport,
+};
 use crate::util::permit_alloc;
 use crate::wrapper::state::{self, PluginState};
 use crate::wrapper::util::process_wrapper;
@@ -86,6 +83,11 @@ pub struct Wrapper<P: Plugin, B: Backend<P>> {
     updated_state_sender: channel::Sender<PluginState>,
     /// The receiver belonging to [`new_state_sender`][Self::new_state_sender].
     updated_state_receiver: channel::Receiver<PluginState>,
+    /// The current latency in samples, as set by the plugin through the [`InitContext`] and the
+    /// [`ProcessContext`]. This value may not be used depending on the audio backend, but it's
+    /// still kept track of to avoid firing debug assertions multiple times for the same latency
+    /// value.
+    current_latency: AtomicU32,
 }
 
 /// Tasks that can be sent from the plugin to be executed on the main thread in a non-blocking
@@ -179,7 +181,7 @@ impl<P: Plugin, B: Backend<P>> Wrapper<P, B> {
         //       the config itself. Right now clap doesn't support this.
         let audio_io_layout = config.audio_io_layout_or_exit::<P>();
 
-        let plugin = P::default();
+        let mut plugin = P::default();
         let task_executor = Mutex::new(plugin.task_executor());
         let params = plugin.params();
 
@@ -250,6 +252,7 @@ impl<P: Plugin, B: Backend<P>> Wrapper<P, B> {
             unprocessed_param_changes: ArrayQueue::new(EVENT_QUEUE_CAPACITY),
             updated_state_sender,
             updated_state_receiver,
+            current_latency: AtomicU32::new(0),
         });
 
         *wrapper.event_loop.borrow_mut() =
@@ -472,6 +475,15 @@ impl<P: Plugin, B: Backend<P>> Wrapper<P, B> {
                 .send(GuiTask::Resize(unscaled_width, unscaled_height))
                 .is_ok();
             nih_debug_assert!(push_successful, "Could not queue window resize");
+        }
+    }
+
+    pub fn set_latency_samples(&self, samples: u32) {
+        // This should only change the value if it's actually needed
+        let old_latency = self.current_latency.swap(samples, Ordering::SeqCst);
+        if old_latency != samples {
+            // None of the backends actually support this at the moment
+            nih_debug_assert_failure!("Standalones currently don't support latency reporting");
         }
     }
 

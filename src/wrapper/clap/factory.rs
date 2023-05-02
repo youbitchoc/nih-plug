@@ -1,6 +1,6 @@
+use clap_sys::factory::plugin_factory::clap_plugin_factory;
 use clap_sys::host::clap_host;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
-use clap_sys::plugin_factory::clap_plugin_factory;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::descriptor::PluginDescriptor;
 use super::wrapper::Wrapper;
-use crate::plugin::ClapPlugin;
+use crate::prelude::ClapPlugin;
 
 /// The plugin's factory. Initialized using a lazy_static from the entry point's `get_factory()`
 /// function. From this point onwards we don't need to generate code with macros anymore.

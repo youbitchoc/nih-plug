@@ -26,7 +26,7 @@ use crate::params;
 use crate::spectrum::SpectrumOutput;
 
 /// A very abstract spectrum analyzer. This draws the magnitude spectrum's bins as vertical lines
-/// with the same distirubtion as the filter frequency parameter..
+/// with the same distribution as the filter frequency parameter..
 pub struct SpectrumAnalyzer {
     spectrum: Arc<Mutex<SpectrumOutput>>,
     sample_rate: Arc<AtomicF32>,
@@ -87,10 +87,14 @@ impl View for SpectrumAnalyzer {
         let nyquist = self.sample_rate.load(Ordering::Relaxed) / 2.0;
 
         // This skips background and border drawing
+        // NOTE: We could do the same thing like in Spectral Compressor and draw part of this
+        //       spectrum analyzer as a single mesh but for whatever erason the aliasing/moire
+        //       pattern here doesn't look nearly as bad.
         let line_width = cx.style.dpi_factor as f32 * 1.5;
         let paint = vg::Paint::color(cx.font_color().cloned().unwrap_or_default().into())
             .with_line_width(line_width);
-        for (bin_idx, magnetude) in spectrum.iter().enumerate() {
+        let mut path = vg::Path::new();
+        for (bin_idx, magnitude) in spectrum.iter().enumerate() {
             // We'll match up the bin's x-coordinate with the filter frequency parameter
             let frequency = (bin_idx as f32 / spectrum.len() as f32) * nyquist;
             // NOTE: This takes the safe-mode switch into acocunt. When it is enabled, the range is
@@ -100,20 +104,19 @@ impl View for SpectrumAnalyzer {
                 continue;
             }
 
-            // Scale this so that 1.0/0 dBFS magnetude is at 80% of the height, the bars begin at
+            // Scale this so that 1.0/0 dBFS magnitude is at 80% of the height, the bars begin at
             // -80 dBFS, and that the scaling is linear
-            nih_debug_assert!(*magnetude >= 0.0);
-            let magnetude_db = nih_plug::util::gain_to_db(*magnetude);
-            let height = ((magnetude_db + 80.0) / 100.0).clamp(0.0, 1.0);
+            nih_debug_assert!(*magnitude >= 0.0);
+            let magnitude_db = nih_plug::util::gain_to_db(*magnitude);
+            let height = ((magnitude_db + 80.0) / 100.0).clamp(0.0, 1.0);
 
-            let mut path = vg::Path::new();
             path.move_to(
                 bounds.x + (bounds.w * t),
                 bounds.y + (bounds.h * (1.0 - height)),
             );
             path.line_to(bounds.x + (bounds.w * t), bounds.y + bounds.h);
-
-            canvas.stroke_path(&mut path, &paint);
         }
+
+        canvas.stroke_path(&mut path, &paint);
     }
 }

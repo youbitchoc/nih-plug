@@ -73,6 +73,12 @@ Scroll down for more information on the underlying plugin framework.
   again when the input returns back to safe levels. Made for personal use during
   plugin development and intense sound design sessions, but maybe you'll find it
   useful too!
+- [**Soft Vacuum**](plugins/soft_vacuum) is a straightforward port of
+  Airwindows' [Hard Vacuum](https://www.airwindows.com/hard-vacuum-vst/) plugin
+  with parameter smoothing and up to 16x linear-phase oversampling, because I
+  liked the distortion and just wished it had oversampling. All credit goes to
+  Chris from Airwindows. I just wanted to share this in case anyone else finds
+  it useful.
 - [**Spectral Compressor**](plugins/spectral_compressor) can squash anything
   into pink noise, apply simultaneous upwards and downwards compressor to
   dynamically match the sidechain signal's spectrum and morph one sound into
@@ -128,7 +134,6 @@ Scroll down for more information on the underlying plugin framework.
 - Optional sample accurate automation support for VST3 and CLAP that can be
   enabled by setting the `Plugin::SAMPLE_ACCURATE_AUTOMATION` constant to
   `true`.
-- Support for CLAP's polyphonic modulation on a per-parameter basis.
 - Optional support for compressing the human readable JSON state files using
   [Zstandard](https://en.wikipedia.org/wiki/Zstd).
 - Comes with adapters for popular Rust GUI frameworks as well as some basic
@@ -146,6 +151,10 @@ Scroll down for more information on the underlying plugin framework.
     byte buffers in the process function.
 - Support for flexible dynamic buffer configurations, including variable numbers
   of input and output ports.
+- First-class support several more exotic CLAP features:
+  - Both monophonic and polyphonic parameter modulation are supported.
+  - Plugins can declaratively define pages of remote controls that DAWs can bind
+    to hardware controllers.
 - A plugin bundler accessible through the
   `cargo xtask bundle <package> <build_arguments>` command that automatically
   detects which plugin targets your plugin exposes and creates the correct

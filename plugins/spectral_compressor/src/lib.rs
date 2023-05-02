@@ -14,31 +14,39 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use analyzer::AnalyzerData;
+use atomic_float::AtomicF32;
+use crossbeam::atomic::AtomicCell;
+use editor::EditorMode;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 use realfft::num_complex::Complex32;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use triple_buffer::TripleBuffer;
 
+mod analyzer;
 mod compressor_bank;
+mod curve;
 mod dry_wet_mixer;
 mod editor;
 
 const MIN_WINDOW_ORDER: usize = 6;
 #[allow(dead_code)]
 const MIN_WINDOW_SIZE: usize = 1 << MIN_WINDOW_ORDER; // 64
-const DEFAULT_WINDOW_ORDER: usize = 12;
+const DEFAULT_WINDOW_ORDER: usize = 11;
 #[allow(dead_code)]
-const DEFAULT_WINDOW_SIZE: usize = 1 << DEFAULT_WINDOW_ORDER; // 4096
+const DEFAULT_WINDOW_SIZE: usize = 1 << DEFAULT_WINDOW_ORDER; // 2048
 const MAX_WINDOW_ORDER: usize = 15;
 const MAX_WINDOW_SIZE: usize = 1 << MAX_WINDOW_ORDER; // 32768
 
 const MIN_OVERLAP_ORDER: usize = 2;
 #[allow(dead_code)]
 const MIN_OVERLAP_TIMES: usize = 1 << MIN_OVERLAP_ORDER; // 4
-const DEFAULT_OVERLAP_ORDER: usize = 3;
+const DEFAULT_OVERLAP_ORDER: usize = 4;
 #[allow(dead_code)]
-const DEFAULT_OVERLAP_TIMES: usize = 1 << DEFAULT_OVERLAP_ORDER; // 4
+const DEFAULT_OVERLAP_TIMES: usize = 1 << DEFAULT_OVERLAP_ORDER; // 16
 const MAX_OVERLAP_ORDER: usize = 5;
 #[allow(dead_code)]
 const MAX_OVERLAP_TIMES: usize = 1 << MAX_OVERLAP_ORDER; // 32
@@ -49,6 +57,9 @@ pub struct SpectralCompressor {
 
     /// The current buffer config, used for updating the compressors.
     buffer_config: BufferConfig,
+    /// The current sample rate. Stores the same information as in `BufferConfig`, but this can be
+    /// shared with the editor where it's used to compute frequencies for the spectrum analyzer.
+    sample_rate: Arc<AtomicF32>,
 
     /// An adapter that performs most of the overlap-add algorithm for us.
     stft: util::StftHelper<1>,
@@ -66,6 +77,10 @@ pub struct SpectralCompressor {
     plan_for_order: Option<[Plan; MAX_WINDOW_ORDER - MIN_WINDOW_ORDER + 1]>,
     /// The output of our real->complex FFT.
     complex_fft_buffer: Vec<Complex32>,
+
+    /// The output for the analyzer data computed in `CompressorBank` while the editor is open. This
+    /// can be cloned and moved into the editor.
+    analyzer_output_data: Arc<Mutex<triple_buffer::Output<AnalyzerData>>>,
 }
 
 /// An FFT plan for a specific window size, all of which will be precomputed during initilaization.
@@ -82,6 +97,10 @@ pub struct SpectralCompressorParams {
     /// restored.
     #[persist = "editor-state"]
     pub editor_state: Arc<ViziaState>,
+    /// The mode the editor is currently in. Essentially just a fancy boolean to indicate whether
+    /// it's expanded or not.
+    #[persist = "editor-mode"]
+    pub editor_mode: Arc<AtomicCell<EditorMode>>,
 
     // NOTE: These `Arc`s are only here temporarily to work around Vizia's Lens requirements so we
     // can use the generic UIs
@@ -134,9 +153,15 @@ pub struct GlobalParams {
 
 impl Default for SpectralCompressor {
     fn default() -> Self {
+        // The spectrum analyzer and gain reduction data is computed directly in the spectral
+        // compression routine in `compressor_bank`. `analyzer_output_data` can then be used in the
+        // editor to draw the data.
+        let (analyzer_input_data, analyzer_output_data) = TripleBuffer::default().split();
+
         // Changing any of the compressor threshold or ratio parameters will set an atomic flag in
         // this object that causes the compressor thresholds and ratios to be recalcualted
-        let compressor_bank = compressor_bank::CompressorBank::new(2, MAX_WINDOW_SIZE);
+        let compressor_bank =
+            compressor_bank::CompressorBank::new(analyzer_input_data, 2, MAX_WINDOW_SIZE);
 
         SpectralCompressor {
             params: Arc::new(SpectralCompressorParams::new(&compressor_bank)),
@@ -147,6 +172,7 @@ impl Default for SpectralCompressor {
                 max_buffer_size: 0,
                 process_mode: ProcessMode::Realtime,
             },
+            sample_rate: Arc::new(AtomicF32::new(1.0)),
 
             // These three will be set to the correct values in the initialize function
             stft: util::StftHelper::new(2, MAX_WINDOW_SIZE, 0),
@@ -158,6 +184,8 @@ impl Default for SpectralCompressor {
             // the plugin is initialized
             plan_for_order: None,
             complex_fft_buffer: Vec::with_capacity(MAX_WINDOW_SIZE / 2 + 1),
+
+            analyzer_output_data: Arc::new(Mutex::new(analyzer_output_data)),
         }
     }
 }
@@ -237,8 +265,11 @@ impl SpectralCompressorParams {
     /// Create a new [`SpectralCompressorParams`] object. Changing any of the compressor threshold
     /// or ratio parameters causes the passed compressor bank's parameters to be updated.
     pub fn new(compressor_bank: &compressor_bank::CompressorBank) -> Self {
+        let editor_mode: Arc<AtomicCell<EditorMode>> = Arc::default();
+
         SpectralCompressorParams {
-            editor_state: editor::default_state(),
+            editor_state: editor::default_state(editor_mode.clone()),
+            editor_mode,
 
             // TODO: Do still enable per-block smoothing for these settings, because why not. This
             //       will require updating the compressor bank.
@@ -286,8 +317,18 @@ impl Plugin for SpectralCompressor {
         self.params.clone()
     }
 
-    fn editor(&self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone(), self.params.editor_state.clone())
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(
+            self.params.editor_state.clone(),
+            editor::Data {
+                params: self.params.clone(),
+
+                editor_mode: self.params.editor_mode.clone(),
+
+                analyzer_data: self.analyzer_output_data.clone(),
+                sample_rate: self.sample_rate.clone(),
+            },
+        )
     }
 
     fn initialize(
@@ -298,6 +339,10 @@ impl Plugin for SpectralCompressor {
     ) -> bool {
         // Needed to update the compressors later
         self.buffer_config = *buffer_config;
+
+        // And this is used in the editor to draw the analyzer
+        self.sample_rate
+            .store(buffer_config.sample_rate, Ordering::Relaxed);
 
         // This plugin can accept a variable number of audio channels, so we need to resize
         // channel-dependent data structures accordingly

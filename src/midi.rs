@@ -3,7 +3,7 @@
 use midi_consts::channel_event as midi;
 
 use self::sysex::SysExMessage;
-use crate::plugin::Plugin;
+use crate::prelude::Plugin;
 
 pub mod sysex;
 
@@ -383,6 +383,30 @@ impl<S> NoteEvent<S> {
             NoteEvent::MidiPitchBend { .. } => None,
             NoteEvent::MidiCC { .. } => None,
             NoteEvent::MidiProgramChange { .. } => None,
+            NoteEvent::MidiSysEx { .. } => None,
+        }
+    }
+
+    /// Returns the event's channel, if it has any.
+    pub fn channel(&self) -> Option<u8> {
+        match self {
+            NoteEvent::NoteOn { channel, .. } => Some(*channel),
+            NoteEvent::NoteOff { channel, .. } => Some(*channel),
+            NoteEvent::Choke { channel, .. } => Some(*channel),
+            NoteEvent::VoiceTerminated { channel, .. } => Some(*channel),
+            NoteEvent::PolyModulation { .. } => None,
+            NoteEvent::MonoAutomation { .. } => None,
+            NoteEvent::PolyPressure { channel, .. } => Some(*channel),
+            NoteEvent::PolyVolume { channel, .. } => Some(*channel),
+            NoteEvent::PolyPan { channel, .. } => Some(*channel),
+            NoteEvent::PolyTuning { channel, .. } => Some(*channel),
+            NoteEvent::PolyVibrato { channel, .. } => Some(*channel),
+            NoteEvent::PolyExpression { channel, .. } => Some(*channel),
+            NoteEvent::PolyBrightness { channel, .. } => Some(*channel),
+            NoteEvent::MidiChannelPressure { channel, .. } => Some(*channel),
+            NoteEvent::MidiPitchBend { channel, .. } => Some(*channel),
+            NoteEvent::MidiCC { channel, .. } => Some(*channel),
+            NoteEvent::MidiProgramChange { channel, .. } => Some(*channel),
             NoteEvent::MidiSysEx { .. } => None,
         }
     }

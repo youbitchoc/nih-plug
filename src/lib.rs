@@ -22,14 +22,17 @@
 //!   a call to [`nih_export_vst3!()`] and/or [`nih_export_clap!()`] in your `lib.rs` file to expose
 //!   the plugin functionality. Some of these traits will require you to implement an additional
 //!   trait containing API-specific information for the plugin.
+//!
+//!   Check the `Plugin` trait's documentation for more information on NIH-plug's general structure
+//!   and approach with respect to declarativity.
 //! - NIH-plug comes with a bundler that creates plugin bundles for you based on the exported plugin
 //!   formats and the operating system and architecture you're compiling for. Check out the
 //!   readme for
 //!   [`nih_plug_xtask`](https://github.com/robbert-vdh/nih-plug/tree/master/nih_plug_xtask) for
 //!   instructions on how to use this within your own project.
 //! - It's also possible to export a standalone application from a plugin using the
-//!   [`nih_export_standalone()`][prelude::nih_export_standalone()] function. Check that function's
-//!   documentation to learn how to do this. This requires enabling the `standalone` crate feature.
+//!   [`nih_export_standalone()`] function. Check that function's documentation to learn how to do
+//!   this. This requires enabling the `standalone` crate feature.
 //! - Everything is described in more detail on the [`Plugin`][prelude::Plugin] trait and everything
 //!   linked from there, but a plugin's general lifecycle involves the following function calls.
 //!
